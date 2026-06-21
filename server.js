@@ -46,10 +46,10 @@ const POWERUPS = ['shield', 'slowmo', 'life', 'oil'];
 
 // oncoming vehicle types — w/h are sizes, spd scales base speed, weight = spawn chance
 const VEHICLES = [
-  { type: 'car',   w: 52, h: 60,  spd: 1.0,  weight: 5, colors: ['#9aa4b2', '#c98b5a', '#7a9ac9', '#b07ac9'] },
-  { type: 'truck', w: 60, h: 96,  spd: 0.7,  weight: 2, colors: ['#d05a5a', '#5a8fd0', '#5ad08f'] },
-  { type: 'bus',   w: 62, h: 108, spd: 0.65, weight: 1, colors: ['#e0a93a', '#3ac0e0'] },
-  { type: 'bike',  w: 28, h: 44,  spd: 1.4,  weight: 2, colors: ['#222831', '#444c5a'] },
+  { type: 'car',   w: 44, h: 74,  spd: 1.0,  weight: 5, colors: ['#9aa4b2', '#c98b5a', '#7a9ac9', '#b07ac9'] },
+  { type: 'truck', w: 48, h: 108, spd: 0.7,  weight: 2, colors: ['#d05a5a', '#5a8fd0', '#5ad08f'] },
+  { type: 'bus',   w: 50, h: 124, spd: 0.65, weight: 1, colors: ['#e0a93a', '#3ac0e0'] },
+  { type: 'bike',  w: 24, h: 48,  spd: 1.4,  weight: 2, colors: ['#222831', '#444c5a'] },
 ];
 function pickVehicle() {
   const total = VEHICLES.reduce((s, v) => s + v.weight, 0);
