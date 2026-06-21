@@ -5,6 +5,7 @@ services:
     name: road-survivors
     runtime: node
     plan: free
+    region: singapore
     buildCommand: npm install
     startCommand: node server.js
     envVars:

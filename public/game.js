@@ -368,15 +368,54 @@ function interpEntities() {
 }
 
 const TICK = 1000 / 30;
+
+// ---- client-side prediction for MY car (kills input lag) ----
+// simulate my own car locally with the same rules as the server, then
+// gently reconcile toward the authoritative position to correct drift.
+const pred = { x: 0, y: 0, boost: 100, init: false };
+let predAcc = 0, predLast = performance.now();
+function predictSelf(st) {
+  const me = st.players.find(p => p.id === myId);
+  if (!me) { pred.init = false; return null; }
+  // when not actively racing (countdown/over/dead) just track the server
+  if (st.phase !== 'racing' || !me.alive) {
+    pred.x = me.x; pred.y = me.y; pred.boost = me.boost; pred.init = true;
+    return { ...me };
+  }
+  if (!pred.init) { pred.x = me.x; pred.y = me.y; pred.boost = me.boost; pred.init = true; }
+
+  const now = performance.now();
+  predAcc += Math.min(100, now - predLast); predLast = now;
+  const PSPEED = 5.2;
+  while (predAcc >= TICK) {
+    predAcc -= TICK;
+    const i = input;
+    let handling = 1, surge = 0; let boosting = i.boost && pred.boost > 0;
+    if (boosting) { handling = 1.8; surge = -3.2; pred.boost = Math.max(0, pred.boost - 1.6); }
+    else if (i.brake) { handling = 0.9; surge = 2.4; pred.boost = Math.min(100, pred.boost + 0.4); }
+    else { pred.boost = Math.min(100, pred.boost + 0.3); }
+    pred.x += ((i.right ? 1 : 0) - (i.left ? 1 : 0)) * PSPEED * handling;
+    pred.y += ((i.down ? 1 : 0) - (i.up ? 1 : 0)) * PSPEED * 0.9 + surge;
+    pred.x = Math.min(Math.max(pred.x, roadL + 6), roadR - CAR_W - 6);
+    pred.y = Math.min(Math.max(pred.y, 60), H - CAR_H - 10);
+  }
+  // soft reconcile to server truth (handles collisions/teleports/drift)
+  pred.x += (me.x - pred.x) * 0.12;
+  pred.y += (me.y - pred.y) * 0.12;
+  return { ...me, x: pred.x, y: pred.y };
+}
+
 function render() {
   requestAnimationFrame(render);
   ctx.clearRect(0, 0, W, H);
   const st = interpEntities();
   const lanes = (st && st.lanes) || 3;
   const meNow = st && st.players.find(p => p.id === myId);
-  // road rushes faster when boosting, crawls when braking — sells the sense of speed
+  // road rushes faster when boosting, crawls when braking — driven by local input for instant feel
   let roadSpeed = 6;
-  if (meNow && meNow.alive) { if (meNow.boosting) roadSpeed = 17; else if (input.brake) roadSpeed = 2.5; }
+  if (meNow && meNow.alive && st.phase === 'racing') {
+    if (input.boost && pred.boost > 0) roadSpeed = 17; else if (input.brake) roadSpeed = 2.5;
+  }
   // smoothly animate the road edges toward the server's current width
   const tgt0 = st ? st.roadX0 : ROAD_X0, tgt1 = st ? st.roadX1 : ROAD_X1;
   roadL += (tgt0 - roadL) * 0.08;
@@ -393,13 +432,16 @@ function render() {
     st.slicks.forEach(s => { ctx.save(); ctx.fillStyle = 'rgba(20,20,30,.75)'; ctx.beginPath(); ctx.ellipse(s.x + 15, s.y + 15, 18, 14, 0, 0, 7); ctx.fill(); ctx.fillStyle = 'rgba(120,90,160,.4)'; ctx.beginPath(); ctx.ellipse(s.x + 11, s.y + 11, 6, 4, 0, 0, 7); ctx.fill(); ctx.restore(); });
     st.items.forEach(it => drawItem(it.x, it.y, it.type));
     st.traffic.forEach(t => drawTraffic(t.x, t.y, t.c, t.w, t.h, t.vt));
+    const predMe = predictSelf(st);
     st.players.forEach(p => {
       if (p.disconnected) return;
       const isMe = p.id === myId;
-      drawCar(p.x, p.y, p.color, { me: isMe, dead: !p.alive, shield: p.shield, invuln: p.invuln && p.alive, boosting: p.boosting, special: p.special });
+      const dx = isMe && predMe ? predMe.x : p.x;
+      const dy = isMe && predMe ? predMe.y : p.y;
+      drawCar(dx, dy, p.color, { me: isMe, dead: !p.alive, shield: p.shield, invuln: p.invuln && p.alive, boosting: p.boosting, special: p.special });
       // name + lives
       ctx.fillStyle = p.color; ctx.font = 'bold 10px system-ui'; ctx.textAlign = 'center';
-      ctx.fillText(p.name + ' ' + '❤'.repeat(Math.max(0, Math.min(p.lives, 5))), p.x + CAR_W / 2, p.y - 6);
+      ctx.fillText(p.name + ' ' + '❤'.repeat(Math.max(0, Math.min(p.lives, 5))), dx + CAR_W / 2, dy - 6);
     });
 
     // particles
