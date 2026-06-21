@@ -99,9 +99,12 @@ function spawnPlayer(room, ws, name) {
   const id = nextPid++;
   const slot = room.players.size;
   const token = crypto.randomBytes(8).toString('hex');
+  // ✨ secret: anyone named "shreya" gets the special pretty pink car ✨
+  const special = /^\s*shreya\s*$/i.test(name || '') ? 'shreya' : null;
   const p = {
     id, ws, token, name: name || ('Player ' + id),
-    color: COLORS[slot % COLORS.length],
+    color: special ? '#ff5fb0' : COLORS[slot % COLORS.length],
+    special,
     x: laneX(3, slot % 3), y: H - 120,
     input: {},
     alive: true, lives: 1, distance: 0,
@@ -232,18 +235,20 @@ function step(room) {
     if (!p.alive) continue;
     const i = p.input || {};
 
-    // boost / brake affect personal forward speed (distance) and handling
-    let fwd = 1;
-    if (i.boost && p.boost > 0) { fwd = 1.9; p.boost = Math.max(0, p.boost - 1.6); }
-    else if (i.brake) { fwd = 0.35; p.boost = Math.min(100, p.boost + 0.4); }
+    // boost / brake affect personal forward speed (distance), handling, and screen position
+    let fwd = 1, surge = 0, handling = 1;
+    const boosting = i.boost && p.boost > 0;
+    if (boosting) { fwd = 2.4; handling = 1.8; surge = -3.2; p.boost = Math.max(0, p.boost - 1.6); }
+    else if (i.brake) { fwd = 0.3; handling = 0.9; surge = 2.4; p.boost = Math.min(100, p.boost + 0.4); }
     else { p.boost = Math.min(100, p.boost + 0.3); }
 
-    const handling = i.boost && p.boost > 0 ? 1.15 : 1;
     p.x += ((i.right ? 1 : 0) - (i.left ? 1 : 0)) * PSPEED * handling;
-    p.y += ((i.down ? 1 : 0) - (i.up ? 1 : 0)) * PSPEED * 0.9;
+    // forward surge pushes the car up the road when boosting, drops back when braking
+    p.y += ((i.down ? 1 : 0) - (i.up ? 1 : 0)) * PSPEED * 0.9 + surge;
     const rb = roadBounds(room.lanes);
     p.x = Math.min(Math.max(p.x, rb.x0 + 6), rb.x1 - CAR_W - 6);
     p.y = Math.min(Math.max(p.y, 60), H - CAR_H - 10);
+    p.boosting = boosting;
 
     p.distance += 6 * fwd * slow;
     p.score = Math.floor(p.distance / 10);
@@ -337,11 +342,12 @@ function serialize(room) {
     slowmo: now < room.slowmoUntil,
     elapsed: room.phase === 'racing' && room.startedAt ? Math.floor((now - room.startedAt) / 1000) : 0,
     players: [...room.players.values()].map(p => ({
-      id: p.id, name: p.name, color: p.color,
+      id: p.id, name: p.name, color: p.color, special: p.special,
       x: Math.round(p.x), y: Math.round(p.y),
       alive: p.alive, lives: p.lives, distance: Math.round(p.distance),
       score: p.score, boost: Math.round(p.boost), oil: p.oil,
       shield: now < p.shieldUntil, invuln: now < p.invulnUntil,
+      boosting: !!p.boosting,
       finished: p.finished, disconnected: p.disconnectedAt > 0,
       pickup: (p.pickupAt && now - p.pickupAt < 200) ? p.lastPickup : null,
     })),

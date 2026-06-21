@@ -223,8 +223,66 @@ function drawCar(x, y, color, opts = {}) {
   ctx.save();
   if (opts.dead) ctx.globalAlpha = 0.3;
   if (opts.invuln && !opts.dead) ctx.globalAlpha = 0.4 + 0.4 * Math.sin(performance.now() / 60);
+  // boost flames out the back
+  if (opts.boosting && !opts.dead) {
+    const f = 14 + Math.random() * 14;
+    const grad = ctx.createLinearGradient(0, y + CAR_H, 0, y + CAR_H + f);
+    grad.addColorStop(0, '#fff3b0'); grad.addColorStop(.5, '#ff9d3a'); grad.addColorStop(1, 'rgba(255,77,77,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.moveTo(x + 7, y + CAR_H); ctx.lineTo(x + CAR_W / 2, y + CAR_H + f); ctx.lineTo(x + CAR_W - 7, y + CAR_H); ctx.fill();
+  }
   // shadow
   ctx.fillStyle = 'rgba(0,0,0,.35)'; roundRect(x + 3, y + 5, CAR_W, CAR_H, 7); ctx.fill();
+
+  // ✨ Shreya's special pretty pink car ✨
+  if (opts.special === 'shreya') {
+    const cx = x + CAR_W / 2, t = performance.now();
+    // glittery glow aura
+    ctx.save();
+    ctx.shadowColor = '#ff9ed6'; ctx.shadowBlur = 16;
+    const body = ctx.createLinearGradient(x, y, x + CAR_W, y);
+    body.addColorStop(0, '#ff8ccb'); body.addColorStop(.5, '#ffd6ee'); body.addColorStop(.5, '#ff5fb0'); body.addColorStop(1, '#e0388c');
+    ctx.fillStyle = body; roundRect(x, y, CAR_W, CAR_H, 9); ctx.fill();
+    ctx.restore();
+    // white racing stripes
+    ctx.fillStyle = 'rgba(255,255,255,.85)';
+    ctx.fillRect(cx - 7, y + 2, 4, CAR_H - 4); ctx.fillRect(cx + 3, y + 2, 4, CAR_H - 4);
+    // sparkly windshield
+    const ws = ctx.createLinearGradient(x, y + 10, x, y + 24);
+    ws.addColorStop(0, '#fff'); ws.addColorStop(1, '#bfeaff');
+    ctx.fillStyle = ws; roundRect(x + 6, y + 11, CAR_W - 12, 13, 4); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.55)'; roundRect(x + 6, y + CAR_H - 18, CAR_W - 12, 10, 4); ctx.fill();
+    // heart on the hood
+    const hy = y + CAR_H - 14;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.moveTo(cx, hy + 6);
+    ctx.bezierCurveTo(cx - 8, hy - 3, cx - 4, hy - 8, cx, hy - 3);
+    ctx.bezierCurveTo(cx + 4, hy - 8, cx + 8, hy - 3, cx, hy + 6);
+    ctx.fill();
+    // wheels (pink rims)
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(x - 2, y + 8, 4, 13); ctx.fillRect(x + CAR_W - 2, y + 8, 4, 13);
+    ctx.fillRect(x - 2, y + CAR_H - 23, 4, 13); ctx.fillRect(x + CAR_W - 2, y + CAR_H - 23, 4, 13);
+    // twinkling sparkles around the car
+    for (let s = 0; s < 4; s++) {
+      const a = t / 600 + s * 1.8;
+      const sx = cx + Math.cos(a) * (CAR_W * 0.9), sy = y + CAR_H / 2 + Math.sin(a * 1.3) * (CAR_H * 0.55);
+      const tw = 1.5 + 1.5 * Math.abs(Math.sin(t / 200 + s));
+      ctx.fillStyle = 'rgba(255,255,255,.95)';
+      ctx.beginPath(); ctx.moveTo(sx, sy - tw * 2); ctx.lineTo(sx + tw, sy); ctx.lineTo(sx, sy + tw * 2); ctx.lineTo(sx - tw, sy); ctx.fill();
+    }
+    // little crown
+    ctx.fillStyle = '#ffe24d';
+    const cyk = y - 5;
+    ctx.beginPath(); ctx.moveTo(cx - 8, cyk + 6); ctx.lineTo(cx - 8, cyk); ctx.lineTo(cx - 4, cyk + 4);
+    ctx.lineTo(cx, cyk - 2); ctx.lineTo(cx + 4, cyk + 4); ctx.lineTo(cx + 8, cyk); ctx.lineTo(cx + 8, cyk + 6); ctx.fill();
+    if (opts.shield) { ctx.globalAlpha = 1; ctx.strokeStyle = '#7ee0ff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(cx, y + CAR_H / 2, CAR_W, 0, 7); ctx.stroke(); }
+    if (opts.me) { ctx.globalAlpha = 1; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; roundRect(x - 3, y - 3, CAR_W + 6, CAR_H + 6, 9); ctx.stroke(); }
+    ctx.restore();
+    return;
+  }
+
   // body with gradient
   const g = ctx.createLinearGradient(x, y, x + CAR_W, y);
   g.addColorStop(0, color); g.addColorStop(.5, '#fff'); g.addColorStop(.5, color); g.addColorStop(1, shade(color, -30));
@@ -315,6 +373,10 @@ function render() {
   ctx.clearRect(0, 0, W, H);
   const st = interpEntities();
   const lanes = (st && st.lanes) || 3;
+  const meNow = st && st.players.find(p => p.id === myId);
+  // road rushes faster when boosting, crawls when braking — sells the sense of speed
+  let roadSpeed = 6;
+  if (meNow && meNow.alive) { if (meNow.boosting) roadSpeed = 17; else if (input.brake) roadSpeed = 2.5; }
   // smoothly animate the road edges toward the server's current width
   const tgt0 = st ? st.roadX0 : ROAD_X0, tgt1 = st ? st.roadX1 : ROAD_X1;
   roadL += (tgt0 - roadL) * 0.08;
@@ -323,7 +385,7 @@ function render() {
   ctx.fillStyle = '#11301b'; ctx.fillRect(0, 0, W, H);
   ctx.fillStyle = '#2a2f3a'; ctx.fillRect(roadL, 0, roadR - roadL, H);
   ctx.fillStyle = '#e6edf3'; ctx.fillRect(roadL - 4, 0, 4, H); ctx.fillRect(roadR, 0, 4, H);
-  scroll = (scroll + 6) % 60;
+  scroll = (scroll + roadSpeed) % 60;
   ctx.fillStyle = '#ffd24d';
   for (let l = 1; l < lanes; l++) { const lx = roadL + (roadR - roadL) * l / lanes - 2; for (let y = -60 + scroll; y < H; y += 60) ctx.fillRect(lx, y, 4, 32); }
 
@@ -334,7 +396,7 @@ function render() {
     st.players.forEach(p => {
       if (p.disconnected) return;
       const isMe = p.id === myId;
-      drawCar(p.x, p.y, p.color, { me: isMe, dead: !p.alive, shield: p.shield, invuln: p.invuln && p.alive });
+      drawCar(p.x, p.y, p.color, { me: isMe, dead: !p.alive, shield: p.shield, invuln: p.invuln && p.alive, boosting: p.boosting, special: p.special });
       // name + lives
       ctx.fillStyle = p.color; ctx.font = 'bold 10px system-ui'; ctx.textAlign = 'center';
       ctx.fillText(p.name + ' ' + '❤'.repeat(Math.max(0, Math.min(p.lives, 5))), p.x + CAR_W / 2, p.y - 6);
