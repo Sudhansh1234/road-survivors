@@ -1,0 +1,12 @@
+# Deploy to Render.com: New > Blueprint > point at this repo.
+# Gives you a permanent https URL with WebSocket support — no ngrok needed.
+services:
+  - type: web
+    name: road-survivors
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_VERSION
+        value: 20

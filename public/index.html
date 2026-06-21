@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Road Survivors</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+  :root { --bg:#05070c; --line:#ffd24d; --accent:#ffd24d; --pink:#ff4d7b; --cyan:#7ee0ff; }
+  * { box-sizing: border-box; }
+  html,body { margin:0; min-height:100%; color:#e6edf3;
+    font-family:'Press Start 2P', monospace;
+    background:#05070c;
+    background-attachment: fixed;
+  }
+  /* global CRT scanlines over everything */
+  body::after { content:''; position:fixed; inset:0; z-index:100; pointer-events:none;
+    background:repeating-linear-gradient(0deg, rgba(0,0,0,0) 0 2px, rgba(0,0,0,.28) 2px 4px); }
+  #wrap { display:flex; flex-direction:column; align-items:center; gap:18px; padding:24px 14px 50px; }
+  .logo { text-align:center; margin-top:14px; }
+  .logo h1 { margin:0; font-size:clamp(20px,6vw,38px); line-height:1.3;
+    color:var(--accent); text-shadow:3px 3px 0 var(--pink), 6px 6px 0 rgba(0,0,0,.5); }
+  .logo .car { font-size:46px; display:block; margin-bottom:14px; animation:rev 1.2s ease-in-out infinite alternate; }
+  @keyframes rev { from{transform:translateX(-8px) rotate(-2deg)} to{transform:translateX(8px) rotate(2deg)} }
+  .sub { color:var(--cyan); font-size:10px; margin-top:14px; text-align:center; line-height:1.6; }
+  #game { background:#11151c; touch-action:none; max-width:96vw; height:auto;
+    border:4px solid var(--accent); box-shadow:0 0 0 4px #05070c, 0 0 30px rgba(255,210,77,.25); }
+  /* arcade cabinet panel */
+  .panel { background:#0b0f17; border:4px solid var(--accent);
+    box-shadow:0 0 0 4px #05070c, 6px 6px 0 rgba(0,0,0,.6);
+    padding:22px; width:420px; max-width:94vw; }
+  input, button { font-family:'Press Start 2P', monospace; }
+  input { background:#05070c; border:3px solid #3a4150; color:#fff;
+    padding:14px; width:100%; margin-top:10px; outline:none; font-size:13px; }
+  input:focus { border-color:var(--accent); }
+  input::placeholder { color:#3a4150; }
+  label { font-size:10px; color:var(--cyan); line-height:1.6; }
+  button { cursor:pointer; border:3px solid #05070c; padding:15px 16px; font-size:12px;
+    background:#283039; color:#fff; margin-top:16px; width:100%;
+    box-shadow:4px 4px 0 rgba(0,0,0,.6); transition:transform .06s; }
+  button:hover { filter:brightness(1.15); }
+  button:active { transform:translate(3px,3px); box-shadow:1px 1px 0 rgba(0,0,0,.6); }
+  button.secondary { background:#283039; color:var(--cyan); }
+  button.accent { background:var(--accent); color:#05070c; }
+  button.ghost { background:transparent; border:3px solid #3a4150; color:#7d8694; font-size:10px; padding:10px; }
+  .choices { display:flex; flex-direction:column; gap:14px; }
+  .choices button { margin-top:0; }
+  .hidden { display:none; }
+  #players { list-style:none; padding:0; margin:16px 0 0; display:flex; flex-wrap:wrap; gap:10px; }
+  #players li { display:flex; align-items:center; gap:8px; background:#05070c;
+    padding:10px 12px; font-size:10px; border:3px solid #232a33; }
+  .dot { width:12px; height:12px; display:inline-block; }
+  .hint { font-size:9px; color:#5a6372; margin-top:16px; line-height:1.9; }
+  .codebox { text-align:center; background:#05070c; border:3px dashed var(--accent);
+    padding:18px; margin-top:12px; }
+  .codebox .code { font-size:34px; letter-spacing:8px; color:var(--accent); padding-left:8px; }
+  .codebox small { color:#5a6372; display:block; margin-top:12px; font-size:8px; line-height:1.6; }
+  .back { color:#5a6372; cursor:pointer; font-size:9px; display:inline-block; margin-bottom:8px; }
+  .back:hover { color:#fff; }
+
+  /* ---- Fresh full-screen race view ---- */
+  body.playing { background:#05070c; }
+  body.playing #wrap { padding:0; gap:0; height:100vh; justify-content:center; }
+  body.playing .logo, body.playing #lobby, body.playing #home,
+  body.playing #createPanel, body.playing #joinPanel { display:none !important; }
+  body.playing #game { height:92vh; width:auto; max-width:none;
+    animation:dropin .5s cubic-bezier(.2,.9,.3,1.3); }
+  @keyframes dropin { from { transform:translateY(-40px) scale(.92); opacity:0; } to { transform:none; opacity:1; } }
+
+  /* mode selector */
+  .modes { display:flex; flex-direction:column; gap:10px; margin-top:8px; }
+  .modebtn { margin-top:0; background:#11161f; color:#9aa4b2; border:3px solid #232a33; font-size:11px; }
+  .modebtn.sel { background:var(--accent); color:#05070c; border-color:#05070c; }
+
+  /* mobile action buttons */
+  #mobileBtns { position:fixed; bottom:18px; left:0; right:0; z-index:60;
+    display:flex; justify-content:center; gap:14px; padding:0 14px; }
+  .mbtn { width:90px; margin:0; font-size:11px; background:#283039; color:#fff;
+    opacity:.92; border:3px solid #05070c; }
+  .mbtn.boost { background:var(--accent); color:#05070c; }
+  @media (hover:hover) and (pointer:fine) { #mobileBtns { display:none !important; } }
+
+  /* ---- Classic arcade title screen ---- */
+  #title { position:fixed; inset:0; z-index:50; cursor:pointer;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:#05070c; overflow:hidden; }
+  /* animated scrolling road behind the title */
+  #title .road-bg { position:absolute; inset:0;
+    background:
+      linear-gradient(90deg, transparent 18%, #11161f 18%, #11161f 82%, transparent 82%),
+      repeating-linear-gradient(0deg, #ffd24d 0 28px, transparent 28px 70px);
+    background-size:100% 100%, 10px 98px;
+    background-position:center, center 0;
+    background-repeat:no-repeat, repeat-y;
+    animation:road 0.5s linear infinite; opacity:.5; }
+  @keyframes road { to { background-position:center, center 98px; } }
+  #title .scan { position:absolute; inset:0; pointer-events:none;
+    background:repeating-linear-gradient(0deg, rgba(0,0,0,0) 0 2px, rgba(0,0,0,.35) 2px 4px); }
+  #title .content { position:relative; text-align:center; padding:20px; }
+  .arcade-title { font-family:'Press Start 2P', monospace; line-height:1.4;
+    font-size:clamp(20px, 7vw, 52px); color:#ffd24d;
+    text-shadow:4px 4px 0 #ff4d7b, 8px 8px 0 rgba(0,0,0,.5);
+    animation:flicker 4s infinite steps(1); }
+  @keyframes flicker { 0%,96%,100%{opacity:1} 97%{opacity:.4} 98%{opacity:1} 99%{opacity:.6} }
+  .arcade-sub { font-family:'Press Start 2P', monospace; font-size:clamp(8px,2.4vw,13px);
+    color:#7ee0ff; margin-top:22px; letter-spacing:1px; }
+  .press-start { font-family:'Press Start 2P', monospace; font-size:clamp(10px,3vw,18px);
+    color:#fff; margin-top:54px; animation:blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+  .credit { font-family:'Press Start 2P', monospace; font-size:9px; color:#444c5a;
+    position:absolute; bottom:18px; left:0; right:0; text-align:center; }
+  .pixelcar { font-size:clamp(40px,12vw,90px); margin-bottom:18px; display:block;
+    animation:bob 0.6s ease-in-out infinite alternate; }
+  @keyframes bob { to { transform:translateY(-10px); } }
+</style>
+</head>
+<body>
+
+<!-- Classic arcade title screen -->
+<div id="title">
+  <div class="road-bg"></div>
+  <div class="content">
+    <span class="pixelcar">🏎️</span>
+    <div class="arcade-title">ROAD<br>SURVIVORS</div>
+    <div class="arcade-sub">DODGE · SURVIVE · WIN</div>
+    <div class="press-start">▶ PRESS START</div>
+  </div>
+  <div class="scan"></div>
+  <div class="credit">© 2026 · 1-4 PLAYERS · INSERT FRIEND</div>
+</div>
+
+<div id="wrap">
+  <div class="logo">
+    <span class="car">🏎️</span>
+    <h1>ROAD SURVIVORS</h1>
+    <div class="sub">Dodge the oncoming traffic. Last one driving wins.</div>
+  </div>
+
+  <!-- STEP 1: name + choose create or join -->
+  <div id="home" class="panel">
+    <label>Your name</label>
+    <input id="name" maxlength="16" placeholder="e.g. Sowmya" />
+    <div class="choices" style="margin-top:18px;">
+      <button id="joinChoice" class="accent">🔑 Join game</button>
+      <button id="createChoice" class="secondary">➕ Create room</button>
+    </div>
+  </div>
+
+  <!-- STEP 2a: create room -->
+  <div id="createPanel" class="panel hidden">
+    <span class="back" id="backFromCreate">← back</span>
+    <label>Your room code — share with your friend</label>
+    <div class="codebox">
+      <span class="code" id="genCode">------</span>
+      <small>Friends pick "Join with code" and enter this</small>
+    </div>
+    <button id="copyBtn" class="ghost">📋 Copy code</button>
+    <button id="createJoinBtn" class="accent">Enter room</button>
+  </div>
+
+  <!-- STEP 2b: join room -->
+  <div id="joinPanel" class="panel hidden">
+    <span class="back" id="backFromJoin">← back</span>
+    <label>Enter the 6-digit room code</label>
+    <input id="room" maxlength="6" inputmode="numeric" placeholder="123456"
+      style="text-align:center; font-size:28px; letter-spacing:8px; font-family:ui-monospace,monospace;" />
+    <button id="joinBtn" class="accent">Join room</button>
+  </div>
+
+  <!-- Lobby (after connecting) -->
+  <div id="lobby" class="panel hidden">
+    <label>Room <span id="lobbyCode" style="color:var(--accent);font-family:ui-monospace,monospace;letter-spacing:4px;"></span></label>
+    <ul id="players"></ul>
+    <label style="display:block;margin-top:16px;">Game mode</label>
+    <div class="modes">
+      <button class="modebtn" data-mode="lms">☠️ Last Survivor</button>
+      <button class="modebtn" data-mode="coop">🤝 Co-op Survive</button>
+      <button class="modebtn" data-mode="race">🏁 Distance Race</button>
+    </div>
+    <button id="startBtn">START RACE</button>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:14px;cursor:pointer;font-size:9px;">
+      <input type="checkbox" id="soundChk" checked style="width:auto;margin:0;" /> SOUND ON
+    </label>
+    <div class="hint">
+      Move: <b>Arrows / WASD</b> · Boost: <b>Shift</b> · Brake: <b>Space</b> · Drop oil: <b>E</b><br>
+      On phone: drag to steer.
+    </div>
+  </div>
+
+  <!-- Game -->
+  <canvas id="game" width="480" height="640" class="hidden"></canvas>
+
+  <!-- Mobile action buttons (shown only while playing on touch) -->
+  <div id="mobileBtns" class="hidden">
+    <button id="brakeBtn" class="mbtn">BRAKE</button>
+    <button id="boostBtn" class="mbtn boost">BOOST</button>
+    <button id="oilBtn" class="mbtn">OIL</button>
+  </div>
+
+  <div id="status" class="hidden panel" style="text-align:center;"></div>
+</div>
+
+<script src="game.js"></script>
+</body>
+</html>
