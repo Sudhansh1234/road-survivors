@@ -12,7 +12,7 @@ let particles = [];
 let scroll = 0;
 let soundOn = true;
 
-const input = { left: false, right: false, up: false, down: false, boost: false, brake: false, drop: false };
+const input = { left: false, right: false, up: false, down: false, boost: false, brake: false, drop: false, fire: false };
 let lastSent = '';
 
 // ---- pixel-art sprite assets (Car game v4 pack) ----
@@ -226,6 +226,8 @@ function detectEvents(msg) {
     }
     prevPlayers[p.id] = { lives: p.lives, alive: p.alive, pickup: p.pickup, bump: p.bump };
   });
+  // missile explosions
+  if (msg.booms) msg.booms.forEach(b => { Audio.crash(); explosions.push({ x: b.x, y: b.y, start: performance.now() }); });
   if (msg.count === 'GO!' && lastCount !== 'GO!') Audio.go();
   else if (msg.count && msg.count !== lastCount && msg.count !== 'GO!') Audio.beep();
   lastCount = msg.count;
@@ -259,7 +261,7 @@ function updateStatus(msg) {
 }
 
 // ===================== INPUT =====================
-const keymap = { ArrowLeft: 'left', a: 'left', ArrowRight: 'right', d: 'right', ArrowUp: 'up', w: 'up', ArrowDown: 'down', s: 'down', Shift: 'boost', ' ': 'brake', e: 'drop' };
+const keymap = { ArrowLeft: 'left', a: 'left', ArrowRight: 'right', d: 'right', ArrowUp: 'up', w: 'up', ArrowDown: 'down', s: 'down', Shift: 'boost', ' ': 'brake', e: 'drop', q: 'fire' };
 function typing(e) { const el = e.target; return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA'); }
 function key(e, down) {
   if (typing(e)) return;
@@ -294,7 +296,7 @@ function holdBtn(id, k) {
   el.addEventListener('touchstart', on); el.addEventListener('touchend', off);
   el.addEventListener('mousedown', on); el.addEventListener('mouseup', off);
 }
-holdBtn('boostBtn', 'boost'); holdBtn('brakeBtn', 'brake'); holdBtn('oilBtn', 'drop');
+holdBtn('boostBtn', 'boost'); holdBtn('brakeBtn', 'brake'); holdBtn('oilBtn', 'drop'); holdBtn('fireBtn', 'fire');
 
 // ===================== RENDER =====================
 const ROAD_X0 = 114, ROAD_X1 = 366, CAR_W = 34, CAR_H = 56; // 3-lane defaults (84px lanes, centered)
@@ -410,7 +412,7 @@ function drawTraffic(x, y, c, w = CAR_W, h = CAR_H, sprite = 'taxi') {
   }
   ctx.restore();
 }
-const ITEM_ICON = { shield: '🛡️', slowmo: '⏱️', life: '❤️' };
+const ITEM_ICON = { shield: '🛡️', slowmo: '⏱️', life: '❤️', missile: '🚀' };
 function drawItem(x, y, type) {
   ctx.save();
   if (type === 'oil') {
@@ -441,6 +443,7 @@ function interpEntities() {
     traffic: map(curr.traffic, prev && prev.traffic, 'id'),
     items: map(curr.items, prev && prev.items, 'id'),
     slicks: map(curr.slicks, prev && prev.slicks, 'id'),
+    missiles: map(curr.missiles || [], prev && prev.missiles, 'id'),
     players: map(curr.players, prev && prev.players, 'id'),
   };
 }
@@ -581,6 +584,18 @@ function render() {
     });
     st.items.forEach(it => drawItem(it.x, it.y, it.type));
     st.traffic.forEach(t => drawTraffic(t.x, t.y, t.c, t.w, t.h, t.sp));
+    // missiles
+    (st.missiles || []).forEach(m => {
+      ctx.save();
+      // exhaust flame
+      const fr = BOOST_FR[Math.floor(performance.now() / 50) % BOOST_FR.length];
+      if (fr && fr.complete) { ctx.imageSmoothingEnabled = false; ctx.drawImage(fr, Math.round(m.x - 5), Math.round(m.y + 12), 18, 18); }
+      // body
+      ctx.fillStyle = '#d83a3a'; ctx.fillRect(m.x, m.y + 4, 8, 12);
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(m.x + 4, m.y - 4); ctx.lineTo(m.x + 8, m.y + 6); ctx.lineTo(m.x, m.y + 6); ctx.fill();
+      ctx.fillStyle = '#d83a3a'; ctx.fillRect(m.x - 2, m.y + 12, 12, 3);
+      ctx.restore();
+    });
     const predMe = predictSelf(st);
     st.players.forEach(p => {
       if (p.disconnected) return;
@@ -639,6 +654,7 @@ function drawHUD(st) {
     ctx.fillStyle = me.boost > 25 ? '#54e36b' : '#ff4d4d'; ctx.fillRect(10, H - 20, 120 * (me.boost / 100), 10);
     ctx.fillStyle = '#fff'; ctx.font = '9px system-ui'; ctx.fillText('BOOST', 12, H - 26);
     if (me.oil > 0) { ctx.fillText('🛢️x' + me.oil + ' (E)', 140, H - 14); }
+    if (me.missiles > 0) { ctx.fillText('🚀x' + me.missiles + ' (Q)', 230, H - 14); }
 
     if (mode === 'race') {
       // distance progress with checkpoints

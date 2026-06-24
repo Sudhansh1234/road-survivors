@@ -46,7 +46,7 @@ const CAR_W = 34, CAR_H = 56;
 const TICK = 1000 / 30;
 const RACE_TARGET = 6000; // distance to win race mode
 
-const POWERUPS = ['shield', 'slowmo', 'life', 'oil'];
+const POWERUPS = ['shield', 'slowmo', 'life', 'oil', 'missile'];
 
 // oncoming vehicles â€” sprite = client asset key, w/h = collision size, spd scales speed, weight = spawn chance
 // w is uniform (vehicles are all the same width); h varies by length
@@ -84,6 +84,8 @@ function getRoom(name) {
       traffic: [],
       items: [],
       slicks: [],
+      missiles: [],
+      booms: [],
       nextId: 1,
       tick: 0,
       spawnTimer: 0,
@@ -124,6 +126,7 @@ function spawnPlayer(room, ws, name, opts = {}) {
     alive: true, lives: 1, distance: 0,
     shieldUntil: 0, invulnUntil: 0,
     boost: 100, oil: 0, lastDrop: 0,
+    missiles: 0, lastFire: 0,
     score: 0, finished: false, place: 0,
     disconnectedAt: 0,
   };
@@ -136,7 +139,7 @@ function cleanColor(c) { return (typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.te
 function startingLives(mode) { return mode === 'lms' ? 1 : 3; }
 
 function resetGame(room) {
-  room.traffic = []; room.items = []; room.slicks = [];
+  room.traffic = []; room.items = []; room.slicks = []; room.missiles = []; room.booms = [];
   room.spawnTimer = 0; room.itemTimer = 120; room.tick = 0;
   room.over = false; room.result = null; room.lanes = 4;
   room.slowmoUntil = 0;
@@ -147,7 +150,7 @@ function resetGame(room) {
     p.lives = startingLives(room.mode);
     p.distance = 0; p.score = 0; p.finished = false; p.place = 0;
     p.shieldUntil = 0; p.invulnUntil = Date.now() + 4000; // safe during countdown
-    p.boost = 100; p.oil = 0;
+    p.boost = 100; p.oil = 0; p.missiles = 0;
     p.x = laneX(Math.max(n, 2), slot % Math.max(n, 2));
     p.y = H - 120;
     slot++;
@@ -245,6 +248,31 @@ function step(room) {
   for (const s of room.slicks) { s.y += s.speed * slow; s.life--; }
   room.slicks = room.slicks.filter(s => s.y < H + 60 && s.life > 0);
 
+  // ---- missiles fly up the road, blow up traffic & opponents ----
+  room.booms = [];
+  for (const m of room.missiles) {
+    m.y -= m.speed;
+    // hit traffic
+    for (const t of room.traffic) {
+      if (aabb(m.x, m.y, 8, 16, t.x, t.y, t.w, t.h)) {
+        m.dead = true; t.dead = true;
+        room.booms.push({ x: t.x + t.w / 2, y: t.y + t.h / 2 });
+        break;
+      }
+    }
+    if (m.dead) continue;
+    // hit an opponent player
+    for (const q of room.players.values()) {
+      if (q.id === m.owner || !q.alive) continue;
+      if (aabb(m.x, m.y, 8, 16, q.x, q.y, CAR_W, CAR_H)) {
+        m.dead = true; room.booms.push({ x: q.x + CAR_W / 2, y: q.y + CAR_H / 2 });
+        killOrHurt(room, q); break;
+      }
+    }
+  }
+  room.traffic = room.traffic.filter(t => !t.dead);
+  room.missiles = room.missiles.filter(m => !m.dead && m.y > -30);
+
   const PSPEED = 5.2;
   for (const p of room.players.values()) {
     if (!p.alive) continue;
@@ -274,6 +302,12 @@ function step(room) {
       room.slicks.push({ id: room.nextId++, owner: p.id, x: p.x, y: p.y + CAR_H, speed: 3.0, life: 220 });
     }
 
+    // fire missile (travels up the road)
+    if (i.fire && p.missiles > 0 && now - p.lastFire > 500) {
+      p.missiles--; p.lastFire = now;
+      room.missiles.push({ id: room.nextId++, owner: p.id, x: p.x + CAR_W / 2 - 4, y: p.y - 10, speed: 12 });
+    }
+
     // collide with traffic
     for (const t of room.traffic) {
       if (aabb(p.x + 4, p.y + 4, CAR_W - 8, CAR_H - 8, t.x + 3, t.y + 3, t.w - 6, t.h - 6)) {
@@ -294,6 +328,7 @@ function step(room) {
         if (it.type === 'shield') p.shieldUntil = now + 6000;
         else if (it.type === 'life') p.lives++;
         else if (it.type === 'oil') p.oil = Math.min(3, p.oil + 1);
+        else if (it.type === 'missile') p.missiles = Math.min(3, p.missiles + 1);
         else if (it.type === 'slowmo') room.slowmoUntil = now + 4000;
         p.lastPickup = it.type;
         p.pickupAt = now;
@@ -387,7 +422,7 @@ function serialize(room) {
       id: p.id, name: p.name, color: p.color, special: p.special, car: p.car,
       x: Math.round(p.x), y: Math.round(p.y),
       alive: p.alive, lives: p.lives, distance: Math.round(p.distance),
-      score: p.score, boost: Math.round(p.boost), oil: p.oil,
+      score: p.score, boost: Math.round(p.boost), oil: p.oil, missiles: p.missiles,
       shield: now < p.shieldUntil, invuln: now < p.invulnUntil,
       boosting: !!p.boosting,
       bump: !!(p.bumpAt && Date.now() - p.bumpAt < 150),
@@ -397,6 +432,8 @@ function serialize(room) {
     traffic: room.traffic.map(t => ({ id: t.id, x: Math.round(t.x), y: Math.round(t.y), w: t.w, h: t.h, sp: t.sprite })),
     items: room.items.map(it => ({ id: it.id, x: Math.round(it.x), y: Math.round(it.y), type: it.type })),
     slicks: room.slicks.map(s => ({ id: s.id, x: Math.round(s.x), y: Math.round(s.y) })),
+    missiles: room.missiles.map(m => ({ id: m.id, x: Math.round(m.x), y: Math.round(m.y) })),
+    booms: room.booms.map(b => ({ x: Math.round(b.x), y: Math.round(b.y) })),
   };
 }
 
@@ -463,7 +500,7 @@ wss.on('connection', (ws) => {
     if (msg.t === 'input') {
       player.input = {
         left: !!msg.left, right: !!msg.right, up: !!msg.up, down: !!msg.down,
-        boost: !!msg.boost, brake: !!msg.brake, drop: !!msg.drop,
+        boost: !!msg.boost, brake: !!msg.brake, drop: !!msg.drop, fire: !!msg.fire,
       };
     } else if (msg.t === 'mode' && room.phase === 'lobby' || (msg.t === 'mode' && room.over)) {
       if (['lms', 'coop', 'race'].includes(msg.mode)) { room.mode = msg.mode; broadcast(room, lobbyMsg(room)); }
