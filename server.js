@@ -1,4 +1,4 @@
-// Road Survivors - authoritative multiplayer game server
+﻿// Road Survivors - authoritative multiplayer game server
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -19,7 +19,11 @@ const server = http.createServer((req, res) => {
     const ext = path.extname(full);
     const type = ext === '.html' ? 'text/html'
       : ext === '.js' ? 'text/javascript'
-      : ext === '.css' ? 'text/css' : 'text/plain';
+      : ext === '.css' ? 'text/css'
+      : ext === '.png' ? 'image/png'
+      : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
+      : ext === '.gif' ? 'image/gif'
+      : ext === '.svg' ? 'image/svg+xml' : 'text/plain';
     res.writeHead(200, {
       'Content-Type': type,
       'Cache-Control': 'no-store, no-cache, must-revalidate',
@@ -32,7 +36,7 @@ const wss = new WebSocketServer({ server });
 
 // ---- Constants ----
 const W = 480, H = 640;
-const LANEW = 84;                 // constant lane width; road widens as lanes are added
+const LANEW = 62;                 // constant lane width; road widens as lanes are added
 function roadBounds(lanes) {
   const w = lanes * LANEW;
   const x0 = Math.round((W - w) / 2);
@@ -44,12 +48,20 @@ const RACE_TARGET = 6000; // distance to win race mode
 
 const POWERUPS = ['shield', 'slowmo', 'life', 'oil'];
 
-// oncoming vehicle types — w/h are sizes, spd scales base speed, weight = spawn chance
+// oncoming vehicles â€” sprite = client asset key, w/h = collision size, spd scales speed, weight = spawn chance
+// w is uniform (vehicles are all the same width); h varies by length
 const VEHICLES = [
-  { type: 'car',   w: 44, h: 74,  spd: 1.0,  weight: 5, colors: ['#9aa4b2', '#c98b5a', '#7a9ac9', '#b07ac9'] },
-  { type: 'truck', w: 48, h: 108, spd: 0.7,  weight: 2, colors: ['#d05a5a', '#5a8fd0', '#5ad08f'] },
-  { type: 'bus',   w: 50, h: 124, spd: 0.65, weight: 1, colors: ['#e0a93a', '#3ac0e0'] },
-  { type: 'bike',  w: 24, h: 48,  spd: 1.4,  weight: 2, colors: ['#222831', '#444c5a'] },
+  { sprite: 'taxi',         w: 38, h: 64,  spd: 1.05, weight: 4 },
+  { sprite: 'police',       w: 38, h: 64,  spd: 1.2,  weight: 1 },
+  { sprite: 'white-van',    w: 38, h: 72,  spd: 0.9,  weight: 2 },
+  { sprite: 'van-rundown',  w: 38, h: 72,  spd: 0.85, weight: 2 },
+  { sprite: 'bus-blue',     w: 38, h: 104, spd: 0.65, weight: 1 },
+  { sprite: 'bus-orange',   w: 38, h: 104, spd: 0.65, weight: 1 },
+  { sprite: 'school-bus',   w: 38, h: 104, spd: 0.6,  weight: 1 },
+  { sprite: 'truck-red',    w: 38, h: 100, spd: 0.7,  weight: 1 },
+  { sprite: 'truck-white',  w: 38, h: 100, spd: 0.7,  weight: 1 },
+  { sprite: 'truck2-red',   w: 38, h: 104, spd: 0.68, weight: 1 },
+  { sprite: 'truck2-white', w: 38, h: 104, spd: 0.68, weight: 1 },
 ];
 function pickVehicle() {
   const total = VEHICLES.reduce((s, v) => s + v.weight, 0);
@@ -85,6 +97,7 @@ function getRoom(name) {
       countdownEnd: 0,
       mode: 'lms',
       slowmoUntil: 0,
+      collide: true, // solid cars (false = ghost / pass through)
     });
   }
   return rooms.get(name);
@@ -95,15 +108,16 @@ function laneX(lanes, lane) {
   return b.x0 + lane * b.lw + (b.lw - CAR_W) / 2;
 }
 
-function spawnPlayer(room, ws, name) {
+function spawnPlayer(room, ws, name, opts = {}) {
   const id = nextPid++;
   const slot = room.players.size;
   const token = crypto.randomBytes(8).toString('hex');
-  // ✨ secret: anyone named "shreya" gets the special pretty pink car ✨
+  // âœ¨ secret: anyone named "shreya" gets the special pretty pink car âœ¨
   const special = /^\s*shreya\s*$/i.test(name || '') ? 'shreya' : null;
   const p = {
     id, ws, token, name: name || ('Player ' + id),
-    color: special ? '#ff5fb0' : COLORS[slot % COLORS.length],
+    color: special ? '#ff5fb0' : (opts.color || COLORS[slot % COLORS.length]),
+    car: opts.car || 'red',
     special,
     x: laneX(3, slot % 3), y: H - 120,
     input: {},
@@ -116,6 +130,8 @@ function spawnPlayer(room, ws, name) {
   room.players.set(id, p);
   return p;
 }
+
+function cleanColor(c) { return (typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c)) ? c : null; }
 
 function startingLives(mode) { return mode === 'lms' ? 1 : 3; }
 
@@ -153,7 +169,7 @@ function spawnTraffic(room, difficulty) {
   const b = roadBounds(lanes);
   const lw = b.lw;
   const minGap = v.h + 70;
-  let speed = (3.0 + Math.random() * 2.2) * difficulty * v.spd;
+  let speed = (4.8 + Math.random() * 2.4) * difficulty * v.spd * 1.3;
   const open = [];
   for (let l = 0; l < lanes; l++) {
     const cx = b.x0 + l * lw + lw / 2;              // lane center
@@ -170,9 +186,8 @@ function spawnTraffic(room, difficulty) {
   // and every vehicle keeps a constant speed for its whole run
   if (isFinite(pick.rearSpeed)) speed = Math.min(speed, pick.rearSpeed);
   room.traffic.push({
-    id: room.nextId++, type: v.type, x: pick.x, y: -v.h, w: v.w, h: v.h,
+    id: room.nextId++, sprite: v.sprite, x: pick.x, y: -v.h, w: v.w, h: v.h,
     speed,
-    color: v.colors[Math.floor(Math.random() * v.colors.length)],
   });
 }
 
@@ -208,13 +223,13 @@ function step(room) {
   room.tick++;
   const now = Date.now();
   const elapsed = (now - room.startedAt) / 1000;
-  const difficulty = 1 + elapsed / 28;
+  const difficulty = 1 + elapsed / 18; // NPC speed ramps up faster over time
   const slow = now < room.slowmoUntil ? 0.45 : 1;
 
   // spawn traffic
   if (--room.spawnTimer <= 0) {
     spawnTraffic(room, difficulty);
-    room.spawnTimer = Math.max(8, 22 - Math.floor(elapsed / 4));
+    room.spawnTimer = Math.max(14, 34 - Math.floor(elapsed / 4));
   }
   // spawn powerups
   if (--room.itemTimer <= 0) {
@@ -292,6 +307,33 @@ function step(room) {
   }
   room.items = room.items.filter(it => !it.taken);
 
+  // ---- player vs player collision (solid bump, push apart) ----
+  const live = room.collide ? [...room.players.values()].filter(p => p.alive) : [];
+  const rb2 = roadBounds(room.lanes);
+  for (let a = 0; a < live.length; a++) {
+    for (let b = a + 1; b < live.length; b++) {
+      const p = live[a], q = live[b];
+      const ox = Math.min(p.x + CAR_W, q.x + CAR_W) - Math.max(p.x, q.x); // x overlap
+      const oy = Math.min(p.y + CAR_H, q.y + CAR_H) - Math.max(p.y, q.y); // y overlap
+      if (ox > 0 && oy > 0) {
+        if (ox < oy) {
+          // separate horizontally along smaller penetration
+          const push = ox / 2 + 0.5;
+          if (p.x < q.x) { p.x -= push; q.x += push; } else { p.x += push; q.x -= push; }
+        } else {
+          const push = oy / 2 + 0.5;
+          if (p.y < q.y) { p.y -= push; q.y += push; } else { p.y += push; q.y -= push; }
+        }
+        // keep both on the road after the shove
+        p.x = Math.min(Math.max(p.x, rb2.x0 + 6), rb2.x1 - CAR_W - 6);
+        q.x = Math.min(Math.max(q.x, rb2.x0 + 6), rb2.x1 - CAR_W - 6);
+        p.y = Math.min(Math.max(p.y, 60), H - CAR_H - 10);
+        q.y = Math.min(Math.max(q.y, 60), H - CAR_H - 10);
+        p.bumpAt = q.bumpAt = now;
+      }
+    }
+  }
+
   // ---- win / over conditions per mode ----
   const players = [...room.players.values()].filter(p => p.disconnectedAt === 0 || p.alive);
   const all = [...room.players.values()];
@@ -342,16 +384,17 @@ function serialize(room) {
     slowmo: now < room.slowmoUntil,
     elapsed: room.phase === 'racing' && room.startedAt ? Math.floor((now - room.startedAt) / 1000) : 0,
     players: [...room.players.values()].map(p => ({
-      id: p.id, name: p.name, color: p.color, special: p.special,
+      id: p.id, name: p.name, color: p.color, special: p.special, car: p.car,
       x: Math.round(p.x), y: Math.round(p.y),
       alive: p.alive, lives: p.lives, distance: Math.round(p.distance),
       score: p.score, boost: Math.round(p.boost), oil: p.oil,
       shield: now < p.shieldUntil, invuln: now < p.invulnUntil,
       boosting: !!p.boosting,
+      bump: !!(p.bumpAt && Date.now() - p.bumpAt < 150),
       finished: p.finished, disconnected: p.disconnectedAt > 0,
       pickup: (p.pickupAt && now - p.pickupAt < 200) ? p.lastPickup : null,
     })),
-    traffic: room.traffic.map(t => ({ id: t.id, x: Math.round(t.x), y: Math.round(t.y), w: t.w, h: t.h, c: t.color, vt: t.type })),
+    traffic: room.traffic.map(t => ({ id: t.id, x: Math.round(t.x), y: Math.round(t.y), w: t.w, h: t.h, sp: t.sprite })),
     items: room.items.map(it => ({ id: it.id, x: Math.round(it.x), y: Math.round(it.y), type: it.type })),
     slicks: room.slicks.map(s => ({ id: s.id, x: Math.round(s.x), y: Math.round(s.y) })),
   };
@@ -359,7 +402,7 @@ function serialize(room) {
 
 function lobbyMsg(room) {
   return {
-    t: 'lobby', mode: room.mode,
+    t: 'lobby', mode: room.mode, collide: room.collide,
     players: [...room.players.values()].map(p => ({ name: p.name, color: p.color })),
   };
 }
@@ -404,12 +447,13 @@ wss.on('connection', (ws) => {
       if (player) {
         player.ws = ws; player.disconnectedAt = 0;
       } else {
-        player = spawnPlayer(room, ws, (msg.name || '').toString().slice(0, 16));
+        player = spawnPlayer(room, ws, (msg.name || '').toString().slice(0, 16),
+          { car: (msg.car || 'red').toString().slice(0, 16), color: cleanColor(msg.color) });
       }
       if (msg.mode && ['lms', 'coop', 'race'].includes(msg.mode) && room.phase === 'lobby') {
         room.mode = msg.mode;
       }
-      ws.send(JSON.stringify({ t: 'joined', id: player.id, token: player.token, room: roomName, W, H, mode: room.mode }));
+      ws.send(JSON.stringify({ t: 'joined', id: player.id, token: player.token, room: roomName, W, H, mode: room.mode, collide: room.collide }));
       broadcast(room, lobbyMsg(room));
       return;
     }
@@ -423,6 +467,12 @@ wss.on('connection', (ws) => {
       };
     } else if (msg.t === 'mode' && room.phase === 'lobby' || (msg.t === 'mode' && room.over)) {
       if (['lms', 'coop', 'race'].includes(msg.mode)) { room.mode = msg.mode; broadcast(room, lobbyMsg(room)); }
+    } else if (msg.t === 'collide' && (room.phase === 'lobby' || room.over)) {
+      room.collide = !!msg.collide; broadcast(room, lobbyMsg(room));
+    } else if (msg.t === 'car' && (room.phase === 'lobby' || room.over)) {
+      player.car = (msg.car || 'red').toString().slice(0, 16);
+      if (!player.special) { const c = cleanColor(msg.color); if (c) player.color = c; }
+      broadcast(room, lobbyMsg(room));
     } else if (msg.t === 'start') {
       if (room.players.size >= 1) resetGame(room);
     }
@@ -433,4 +483,13 @@ wss.on('connection', (ws) => {
   });
 });
 
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\n  Port ${PORT} is already in use — a server is probably already running.`);
+    console.error(`  Stop it first:  (Windows)  Get-Process node | Stop-Process -Force\n`);
+  } else {
+    console.error('Server error:', err);
+  }
+  process.exit(1);
+});
 server.listen(PORT, () => console.log(`Road Survivors running on http://localhost:${PORT}`));
