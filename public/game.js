@@ -475,7 +475,10 @@ function predictSelf(st) {
     if (boosting) { handling = 1.8; surge = -3.2; pred.boost = Math.max(0, pred.boost - 1.6); }
     else if (i.brake) { handling = 0.9; surge = 2.4; pred.boost = Math.min(100, pred.boost + 0.4); }
     else { pred.boost = Math.min(100, pred.boost + 0.3); }
-    pred.x += ((i.right ? 1 : 0) - (i.left ? 1 : 0)) * PSPEED * handling;
+    // smooth steering — must match the server's easing exactly
+    const steerTarget = (i.right ? 1 : 0) - (i.left ? 1 : 0);
+    pred.steer = (pred.steer || 0) + (steerTarget - (pred.steer || 0)) * 0.3;
+    pred.x += pred.steer * PSPEED * 1.55 * handling; // faster lateral steering
     pred.y += ((i.down ? 1 : 0) - (i.up ? 1 : 0)) * PSPEED * 0.9 + surge;
     pred.x = Math.min(Math.max(pred.x, roadL + 6), roadR - CAR_W - 6);
     pred.y = Math.min(Math.max(pred.y, 60), H - CAR_H - 10);

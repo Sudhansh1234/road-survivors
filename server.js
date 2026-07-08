@@ -140,7 +140,7 @@ function startingLives(mode) { return mode === 'lms' ? 1 : 3; }
 
 function resetGame(room) {
   room.traffic = []; room.items = []; room.slicks = []; room.missiles = []; room.booms = [];
-  room.spawnTimer = 0; room.itemTimer = 120; room.tick = 0;
+  room.spawnTimer = 0; room.laneTimers = null; room.itemTimer = 120; room.tick = 0;
   room.over = false; room.result = null; room.lanes = 4;
   room.slowmoUntil = 0;
   let slot = 0;
@@ -164,34 +164,29 @@ function aabb(ax, ay, aw, ah, bx, by, bw, bh) {
   return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
 }
 
-// pick a lane that has clearance at the top so cars never overlap,
-// and never block every lane at once (keep the race survivable)
-function spawnTraffic(room, difficulty) {
+// try to spawn a vehicle in ONE specific lane, but only if that lane is clear
+// at the top and doing so still leaves at least one lane passable.
+function spawnTrafficLane(room, lane, difficulty) {
   const lanes = room.lanes;
   const v = pickVehicle();
   const b = roadBounds(lanes);
   const lw = b.lw;
   const minGap = v.h + 70;
-  let speed = (4.8 + Math.random() * 2.4) * difficulty * v.spd * 1.3;
-  const open = [];
+  let openCount = 0, thisClear = false, thisRearSpeed = Infinity;
   for (let l = 0; l < lanes; l++) {
-    const cx = b.x0 + l * lw + lw / 2;              // lane center
-    const inLane = room.traffic.filter(t => Math.abs((t.x + t.w / 2) - cx) < lw * 0.55);
-    // rearmost vehicle already in this lane (smallest y = closest to where we spawn)
+    const cx = b.x0 + l * lw + lw / 2;
     let topY = Infinity, rearSpeed = Infinity;
-    for (const t of inLane) { if (t.y < topY) { topY = t.y; rearSpeed = t.speed; } }
-    if (topY === Infinity || topY > minGap) open.push({ x: cx - v.w / 2, rearSpeed });
+    for (const t of room.traffic) { if (Math.abs((t.x + t.w / 2) - cx) < lw * 0.55 && t.y < topY) { topY = t.y; rearSpeed = t.speed; } }
+    const clear = topY === Infinity || topY > minGap;
+    if (clear) openCount++;
+    if (l === lane) { thisClear = clear; thisRearSpeed = rearSpeed; }
   }
-  // leave at least one lane open so a wall is always passable
-  if (open.length <= 1) return;
-  const pick = open[Math.floor(Math.random() * open.length)];
-  // never spawn faster than the vehicle ahead in this lane -> no catch-up, no overlap,
-  // and every vehicle keeps a constant speed for its whole run
-  if (isFinite(pick.rearSpeed)) speed = Math.min(speed, pick.rearSpeed);
-  room.traffic.push({
-    id: room.nextId++, sprite: v.sprite, x: pick.x, y: -v.h, w: v.w, h: v.h,
-    speed,
-  });
+  if (!thisClear) return;        // this lane still has a car near the top
+  if (openCount <= 1) return;    // it's the last passable lane — keep it open
+  let speed = 7 * difficulty;    // uniform speed for all vehicles (ramps with time)
+  if (isFinite(thisRearSpeed)) speed = Math.min(speed, thisRearSpeed); // no overtaking
+  const cx = b.x0 + lane * lw + lw / 2;
+  room.traffic.push({ id: room.nextId++, sprite: v.sprite, x: cx - v.w / 2, y: -v.h, w: v.w, h: v.h, speed });
 }
 
 function spawnItem(room) {
@@ -229,10 +224,15 @@ function step(room) {
   const difficulty = 1 + elapsed / 18; // NPC speed ramps up faster over time
   const slow = now < room.slowmoUntil ? 0.45 : 1;
 
-  // spawn traffic
-  if (--room.spawnTimer <= 0) {
-    spawnTraffic(room, difficulty);
-    room.spawnTimer = Math.max(14, 34 - Math.floor(elapsed / 4));
+  // each lane runs its own random spawn timer, so traffic arrives organically
+  if (!room.laneTimers) room.laneTimers = [];
+  const rr = (a, b) => a + Math.random() * (b - a);
+  for (let l = 0; l < room.lanes; l++) {
+    if (room.laneTimers[l] === undefined) room.laneTimers[l] = rr(15, 90); // staggered start
+    if ((room.laneTimers[l] -= 1) <= 0) {
+      spawnTrafficLane(room, l, difficulty);
+      room.laneTimers[l] = rr(90, 220) - Math.min(55, elapsed * 0.8); // sparser early, busier late
+    }
   }
   // spawn powerups
   if (--room.itemTimer <= 0) {
@@ -285,7 +285,10 @@ function step(room) {
     else if (i.brake) { fwd = 0.3; handling = 0.9; surge = 2.4; p.boost = Math.min(100, p.boost + 0.4); }
     else { p.boost = Math.min(100, p.boost + 0.3); }
 
-    p.x += ((i.right ? 1 : 0) - (i.left ? 1 : 0)) * PSPEED * handling;
+    // smooth steering: ease the steer value toward the input for accel + glide
+    const steerTarget = (i.right ? 1 : 0) - (i.left ? 1 : 0);
+    p.steer = (p.steer || 0) + (steerTarget - (p.steer || 0)) * 0.3;
+    p.x += p.steer * PSPEED * 1.55 * handling; // faster lateral steering
     // forward surge pushes the car up the road when boosting, drops back when braking
     p.y += ((i.down ? 1 : 0) - (i.up ? 1 : 0)) * PSPEED * 0.9 + surge;
     const rb = roadBounds(room.lanes);
